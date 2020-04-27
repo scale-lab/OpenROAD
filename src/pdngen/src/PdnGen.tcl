@@ -447,6 +447,7 @@ proc read_cutclass {layer_name} {
   
   while {![empty_propline]} {
     set line [read_propline]
+
     if {![regexp {CUTCLASS\s+([^\s]+)\s+WIDTH\s+([^\s]+)} $line - cut_class width]} {
       critical 20 "Failed to read CUTCLASS property '$line'"
     }
@@ -455,6 +456,7 @@ proc read_cutclass {layer_name} {
     } else {
       set area [expr $width * $width]
     }
+
     if {$min_area == -1 || $area < $min_area} {
       dict set default_cutclass $layer_name $cut_class
       set min_area $area
@@ -2679,6 +2681,7 @@ proc export_opendb_power_pin {net_name signal_type} {
 
   foreach lay [lreverse $metal_layers] {
     if {[array names stripe_locs "$lay,$signal_type"] == ""} {continue}
+    set count 0
     foreach shape [::odb::getPolygons $stripe_locs($lay,$signal_type)] {
       set points [::odb::getPoints $shape]
       if {[llength $points] != 4} {
@@ -2690,8 +2693,13 @@ proc export_opendb_power_pin {net_name signal_type} {
       set yMin [expr min([[lindex $points 0] getY], [[lindex $points 1] getY], [[lindex $points 2] getY], [[lindex $points 3] getY])]
       set yMax [expr max([[lindex $points 0] getY], [[lindex $points 1] getY], [[lindex $points 2] getY], [[lindex $points 3] getY])]
 
+      set bterm [odb::dbBTerm_create $net "${net_name}.extra${count}"]
+      set bpin [odb::dbBPin_create $bterm]
+      $bpin setPlacementStatus "FIRM"
+
       set layer [$tech findLayer $lay]
       odb::dbBox_create $bpin $layer $xMin $yMin $xMax $yMax
+      incr count
     }
     # debug "created $count pins on $net_name (layer:$lay)"
     # Only promote metal on top layers to be pins
