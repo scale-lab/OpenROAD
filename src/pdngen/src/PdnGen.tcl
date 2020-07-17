@@ -1894,6 +1894,13 @@ proc generate_via_stacks {l1 l2 tag constraints} {
   return [generate_vias $l1 $l2 $intersections $constraints]
 }
 
+proc pdngen::get_stripes {layer type} {
+  variable stripe_locs
+  # debug "start"
+  lappend stripe_locs($layer,$type)
+  # debug "end"
+}
+
 proc add_stripe {layer type polygon_set} {
   variable stripes
   # debug "start"
@@ -4104,99 +4111,134 @@ proc round_to_routing_grid {layer_name location} {
   return [lindex $grid_points $pos]
 }
 
-proc identify_channels {layer_name} {
-  variable block
-  set pitch_check [expr 1.1 * [get_grid_wire_pitch $layer_name]]
+proc get_channels {wires dir min_length pitch} {
+  if {$dir == "hor"} {  
+    set long_wires [odb::bloatSet [odb::shrinkSet $wires $min_length 0] $min_length 0]
+    set short_wires [odb::subtractSet $wires $long_wires]
 
-  foreach row [$block getRows] {
-    set box [$row getBBox]
-    set xMin [$box xMin]
-    set xMax [$box xMax]
-    set yMin [$box yMin]
-    set yMax [$box yMax]
+    # Aggregate wires within $pitch of each other into channels
+    set stripe_channels [odb::shrinkSet [odb::bloatSet $short_wires 0 $pitch] 0 $pitch]
+  } else {
+    set long_wires [odb::bloatSet [odb::shrinkSet $wires 0 $min_length] 0 $min_length]
+    set short_wires [odb::subtractSet $wires $long_wires]
 
-    if {[expr ($xMax - $xMin) < $pitch_check]} {
-      lappend channel_rows [odb::newSetFromRect $xMin $yMin $xMax $yMax]
+    # Aggregate wires within $pitch of each other into channels
+    set stripe_channels [odb::shrinkSet [odb::bloatSet $short_wires $pitch 0] $pitch 0]
+  }
+  
+  return $stripe_channels
+}
+
+proc get_unconnected_channels {channels upper_wires}
+  set unconnected_channels {}
+  
+  foreach rect [odb::getRectangles $channels] {
+    set channel_set [odb::newSetFromRect [$rect xMin] [$rect yMin] [$rect xMax] [$rect yMax]]
+    set connections [odb::andSet $upper_wires $channel_set]
+    if {[llength [odb::getPolygons $connections]] == 0} {
+      lappend unconnected_channels $channel
     }
   }
-  set channels [odb::orSets $channel_rows]
-  # debug "Number of rows in channels found : [llength $channel_rows]"
-  # debug "Number of channels [llength [::odb::getPolygons $channels]]"
-
-  return $channels
+  
+  return $unconnected_channels
 }
 
-proc repair_channel {channel layer_name} {
-  set points [::odb::getPoints $channel]
+proc identify_unconnected_channels {connection tag} {
+  variable block
+
+  set upper_layer [lindex $connection 1]
+  set lower_layer [lindex $connection 0]
+
+  set pitch_check [expr round(1.1 * [get_grid_wire_pitch $upper_layer])]
+  set lower_pitch [get_grid_wire_pitch $lower_layer]
+
+  if {[is_rails_layer $lower_layer]} {
+    set merge_pitch $lower_pitch
+  } else {
+    set merge_pitch [expr $lower_pitch / 2]
+  }
+  
+  # Find all the wires on lower layer that are shorter than pitch_check
+  set channels [get_channels [get_stripes $lower_layer $tag] [get_dir $lower_layer] $pitch_check $merge_pitch]
+  set unconnected_channels [get_unconnected_channels $channels [get_stripes $layer_name $tag]
+  
+  return $unconnected_channels
+}
+
+proc repair_channel {channel layer_name tag} {
+  # IF there a stripe of the other tag in this area THEN
+  #   place a stripe $channel_spacing away from it
+  # ELSE
+  #   place a stripe at snap_to_grid($channel_centre - ($channel_spacing + width))
+  
   set channel_spacing [get_grid_channel_spacing $layer_name]
-  set width [get_grid_wire_width $layer_name]
 
-  set xMin [expr min([[lindex $points 0] getX], [[lindex $points 1] getX], [[lindex $points 2] getX], [[lindex $points 3] getX])]
-  set xMax [expr max([[lindex $points 0] getX], [[lindex $points 1] getX], [[lindex $points 2] getX], [[lindex $points 3] getX])]
-  set yMin [expr min([[lindex $points 0] getY], [[lindex $points 1] getY], [[lindex $points 2] getY], [[lindex $points 3] getY])]
-  set yMax [expr max([[lindex $points 0] getY], [[lindex $points 1] getY], [[lindex $points 2] getY], [[lindex $points 3] getY])]
+  set tags {POWER GROUND}
+  set other_tag [lreplace $tags [lsearch $tags $tag] [lsearch $tags $tag]]
+  
+  set channel_spacing  [get_channel_spacing $layer_name] 
+  set wire_width [get_grid_wire_width $layer_name]
+  
+  if {[get_dir $layer_name] == "hor"} {
+    set channel_centre [expr ([$channel yMax] + [$channel yMin]) / 2]
+  } else {
+    set channel_centre [expr ([$channel xMax] + [$channel xMin]) / 2]
+  }
 
-  set vdd_routing_grid [round_to_routing_grid $layer_name [expr ($xMax + $xMin - $channel_spacing) / 2]]
-  set vss_routing_grid [expr $vdd_routing_grid + $width + $channel_spacing]
+  set channel_set [odb::newSetFromRect [$channel xMin] [$channel yMin] [$channel xMax] [$channel yMax]]
+  set crossing [odb::andSet $channel_set $stripe_locs($layer_name,$other_tag)]
+  if {[llength [set rects [odb::getRectangles $crossing]]] > 0} {
+    #
+    # When there is a strap already present, place a strap next to it
+    #
+    set rect [lindex $rects 0]
     
-  if {([expr $vdd_routing_grid - $width / 2] < $xMin) || ([expr $vss_routing_grid + $width / 2] > $xMax)} {
-    variable def_units
-
-    err 47 "Channel ([expr 1.0 * $xMin / $def_units] [expr 1.0 * $yMin / $def_units] [expr 1.0 * $xMax / $def_units] [expr 1.0 * $yMax / $def_units]) too narrow. Channel on layer $layer_name must be at least [expr (2.0 * $width + $channel_spacing) / $def_units] wide"
-  }
-    
-  set vdd_stripe [odb::newSetFromRect [expr $vdd_routing_grid - $width / 2] $yMin [expr $vdd_routing_grid + $width / 2] $yMax]
-  set vss_stripe [odb::newSetFromRect [expr $vss_routing_grid - $width / 2] $yMin [expr $vss_routing_grid + $width / 2] $yMax]
-
-  add_stripe $layer_name "POWER"  $vdd_stripe
-  add_stripe $layer_name "GROUND" $vss_stripe
-}
-
-proc channel_has_pg_straps {channel layer_name}  {
-  variable stripe_locs
-
-  set power_strap 0
-  set ground_strap 0
-  set check_set [odb::andSet $stripe_locs($layer_name,POWER) $channel]
-  if {[llength [odb::getPolygons $check_set]] > 0} {
-    set power_strap 1
-  }
-  set check_set [odb::andSet $stripe_locs($layer_name,GROUND) $channel]
-  if {[llength [odb::getPolygons $check_set]] > 0} {
-    set ground_strap 1
-  }
-  if {$power_strap && $ground_strap} {
-    return 1
-  }
-
-  # If there is a single strap in the channel, then remove it - the repair will add power and ground
-  if {$power_strap && !$ground_strap} {
-    set $stripe_locs($layer_name,POWER) [odb::subtractSet $stripe_locs($layer_name,POWER) $channel]
+    if {[get_dir $layer_name] == "hor"} {
+      set overlap_centre [expr ([$rect yMin] + [$rect yMax]) / 2]
+      if {$overlap_centre > $channel_centre} {
+        set y [expr $overlap_centre - $channel_spacing - $wire_width]
+      } else {
+        set y [expr $overlap_centre + $channel_spacing + $wire_width]
+      }
+      set stripe [odb::newSetFromRect $xMin [expr $y - $wire_width / 2] $xMax [expr $y + $wire_width / 2]]
+    } else {
+      set overlap_centre [expr ([$rect xMin] + [$rect xMax]) / 2]
+      if {$overlap_centre > $channel_centre} {
+        set x [expr $overlap_centre - $channel_spacing - $wire_width]
+      } else {
+        set x [expr $overlap_centre + $channel_spacing + $wire_width]
+      }
+      set stripe [odb::newSetFromRect [expr $x - $wire_width / 2] $yMin [expr $x + $wire_width / 2] $yMax]
+    }
+  } else {
+    # 
+    # With no other strap present, place this strap left/below the centre of the channel
+    #
+    if {[get_dir $layer_name] == "hor"} {
+      set y [round_to_routing_grid $layer_name [expr $channel_centre - $channel_spacing - $wire_width]]
+      set stripe [odb::newSetFromRect $xMin [expr $y - $wire_width / 2] $xMax [expr $y + $wire_width / 2]]
+    } else {
+      set x [round_to_routing_grid $layer_name [expr $channel_centre - $channel_spacing - $wire_width]]
+      set stripe [odb::newSetFromRect [expr $x - $wire_width / 2] $yMin [expr $x + $wire_width / 2] $yMax]
+    }
   }
 
-  if {!$power_strap && $ground_strap} {
-    set $stripe_locs($layer_name,GROUND) [odb::subtractSet $stripe_locs($layer_name,GROUND) $channel]
-  }
-
-  return 0
+  add_stripe $layer_name $tag $stripe
 }
 
 proc process_channels {} {
-  foreach layer_name [get_grid_channel_layers] {
-    set channels [identify_channels $layer_name]
-    foreach channel [::odb::getPolygons $channels] {
-      set points [::odb::getPoints $channel]
-      if {[llength $points] != 4} {
-        err 46 "Non-rectangular channel area"
-        continue
+  variable grid_data
+  
+  foreach connection [dict get $grid_data connect] {
+    foreach tag {POWER GROUND} {
+      set unconnected_channels [identify_unconnected_channels $connection $tag]
+      foreach rect [::odb::getRectangles $unconnected_channels] {
+        repair_channel $rect $layer_name $tag
+  
       }
-    
-      if {![channel_has_pg_straps $channel $layer_name]} {
-        repair_channel $channel $layer_name
-      }
+      merge_stripes
     }
   }
-  merge_stripes
 }
 
 proc get_stdcell_plus_area {} {
@@ -4491,7 +4533,7 @@ proc plan_grid {} {
   }
   
   add_grid
-  # process_channels
+  process_channels
   
   foreach pwr_net [dict get $design_data power_nets] {
     generate_grid_vias "POWER" $pwr_net
