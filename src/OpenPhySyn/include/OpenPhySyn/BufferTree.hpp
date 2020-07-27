@@ -54,12 +54,12 @@ enum RepairTarget
 {
     RepairMaxCapacitance,
     RepairMaxTransition,
+    RepairMaxFanout,
     RepairSlack,
 };
 enum DesignPhase
 {
     PostPlace,
-    PostDetailedPlace,
     PostRoute
 };
 
@@ -208,6 +208,7 @@ public:
         cluster_threshold                = 0.0;
         driver_resize                    = false;
         repair_capacitance_violations    = false;
+        repair_fanout_violations         = false;
         repair_transition_violations     = false;
         repair_negative_slack            = false;
         timerless                        = false;
@@ -249,6 +250,7 @@ public:
     bool  driver_resize;     // Enable driver resizing with buffering
     bool repair_capacitance_violations; // Repair maximum capacitance violations
     bool repair_transition_violations;  // Repair maximum transition violations
+    bool repair_fanout_violations;      // Repair maximum fanout violations
     bool repair_negative_slack;         // Repair negative slack violations
     bool timerless;                     // Timerless buffer mode
     bool disable_buffering;             // Disable all buffering
