@@ -30,8 +30,8 @@
 // POSSIBILITY OF SUCH DAMAGE.
 #pragma once
 
-#include "OpenPhySyn/PathPoint.hpp"
 #include "OpenPhySyn/Types.hpp"
+#include "OpenPhySyn/PathPoint.hpp"
 
 #include <bitset>
 #include <functional>
@@ -258,24 +258,27 @@ public:
     bool isSingleOutputCombinational(LibraryCell* cell) const;
     void replaceInstance(Instance* inst, LibraryCell* cell);
     bool violatesMaximumCapacitance(InstanceTerm* term, float load_cap,
-                                    float limit_scale_factor) const;
+                                    float limit_scale_factor);
     bool violatesMaximumCapacitance(InstanceTerm* term,
-                                    float limit_scale_factor = 1.0) const;
+                                    float         limit_scale_factor = 1.0);
     bool violatesMaximumTransition(InstanceTerm* term,
                                    float         limit_scale_factor = 1.0);
+    bool violatesMaximumFanout(InstanceTerm* term, int max_fanout = 0);
     ElectircalViolation hasElectricalViolation(InstanceTerm* term,
                                                float cap_scale_factor   = 1.0,
                                                float trans_scale_factor = 1.0);
     std::vector<InstanceTerm*>
-    maximumTransitionViolations(float limit_scale_factor = 1.0) const;
+    maximumTransitionViolations(float limit_scale_factor = 1.0);
     std::vector<InstanceTerm*>
-              maximumCapacitanceViolations(float limit_scale_factor = 1.0) const;
-    bool      isLoad(InstanceTerm* term) const;
+                               maximumCapacitanceViolations(float limit_scale_factor = 1.0);
+    std::vector<InstanceTerm*> maximumFanoutViolations(int max_fanout = 0);
+    bool                       isLoad(InstanceTerm* term) const;
     Instance* createInstance(const char* inst_name, LibraryCell* cell);
     void      createClock(const char* clock_name, std::vector<BlockTerm*> ports,
                           float period);
     void  createClock(const char* clock_name, std::vector<std::string> ports,
                       float period);
+    void  setMaximumFanout(int max_fanout);
     Net*  createNet(const char* net_name);
     float resistance(LibraryTerm* term) const;
     float resistancePerMicron() const;
@@ -391,6 +394,9 @@ private:
     bool                      has_buffer_inverter_seq_;
     bool                      has_equiv_cells_;
     bool                      has_target_loads_;
+    bool                      capacitance_limits_initialized_;
+    bool                      slew_limits_initialized_;
+    bool                      fanout_limits_initialized_;
     float                     res_per_micron_;
     float                     cap_per_micron_;
     bool                      has_wire_rc_;
@@ -416,7 +422,6 @@ private:
         commutative_pins_cache_;
 
     std::unordered_map<float, float> penalty_cache_;
-
     std::unordered_map<std::string, std::shared_ptr<LibraryCellMapping>>
                                                   library_cell_mappings_;
     std::unordered_map<LibraryCell*, std::string> truth_tables_;
@@ -480,3 +485,4 @@ private:
 };
 
 } // namespace psn
+

@@ -32,21 +32,22 @@
 #include <cstring>
 #include <memory>
 #include <unordered_set>
-#include "OpenPhySyn/BufferTree.hpp"
+#include "OpenPhySyn/Types.hpp"
 #include "OpenPhySyn/LibraryMapping.hpp"
+#include "OpenPhySyn/BufferTree.hpp"
+#include "OpenPhySyn/SteinerTree.hpp"
 #include "OpenPhySyn/Psn.hpp"
 #include "OpenPhySyn/PsnTransform.hpp"
-#include "OpenPhySyn/SteinerTree.hpp"
-#include "OpenPhySyn/Types.hpp"
 
 namespace psn
 {
 
+class BufferTree;
 class BufferSolution;
-class OptimizationOptions;
 
 class RepairTimingTransform : public PsnTransform
 {
+
 private:
     int buffer_count_;           // Number of inserted buffers
     int resize_up_count_;        // Number of upsized cells
@@ -59,6 +60,8 @@ private:
                                  // violations
     int capacitance_violations_; // Number of repaired (or attempted)
                                  // capacitance violations
+    int fanout_violations_;      // Number of repaired (or attempted) fanout
+                                 // violations
     float current_area_;         // Incremental area holder
     float saved_slack_;          // Total slack gain
 
@@ -90,6 +93,11 @@ private:
                                 std::vector<InstanceTerm*>& driver_pins,
                                 std::unique_ptr<OptimizationOptions>& options);
 
+    // Repair paths with maximum fanout violations
+    int fixFanoutViolations(Psn*                                  psn_inst,
+                            std::vector<InstanceTerm*>&           driver_pins,
+                            std::unique_ptr<OptimizationOptions>& options);
+
     // Repair paths with negative slack
     int fixNegativeSlack(Psn*                                  psn_inst,
                          std::unordered_set<InstanceTerm*>&    filter_pins,
@@ -109,10 +117,11 @@ public:
     // Run the transform and capture user configurations
     int run(Psn* psn_inst, std::vector<std::string> args) override;
     OPENPHYSYN_DEFINE_TRANSFORM(
-        "repair_timing", "1.2",
+        "repair_timing", "1.3",
         "Repair design timing and electrical violations",
         "Usage: transform repair_timing [-capacitance_violations] "
-        "[-transition_violations] [-negative_slack_violations] [-iterations "
+        "[-transition_violations] [-fanout_violations] "
+        "[-negative_slack_violations] [-iterations "
         "num_iterations] [-buffers buffer_cells] [-inverters inverter cells] "
         "[-minimum_gain gain=0.0] [-auto_buffer_library "
         "<single|small|medium|large|all>] [-no_minimize_buffer_library] "
@@ -128,3 +137,4 @@ public:
 };
 
 } // namespace psn
+

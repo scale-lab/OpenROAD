@@ -49,14 +49,13 @@ bool                     has_transform(const char* transform_name);
 void                     set_dont_use(std::vector<std::string> cell_names);
 int                      set_max_area(float area);
 std::vector<std::string> transition_violations();
-
 std::vector<std::string> capacitance_violations();
-
-int set_log(const char* level);
-int set_log_level(const char* level);
-int set_log_pattern(const char* pattern);
-int transform_internal(std::string              transform_name,
-                       std::vector<std::string> args);
+std::vector<std::string> fanout_violations();
+int                      set_log(const char* level);
+int                      set_log_level(const char* level);
+int                      set_log_pattern(const char* pattern);
+int                      transform_internal(std::string              transform_name,
+                                            std::vector<std::string> args);
 
 DatabaseHandler& get_handler();
 DatabaseHandler& get_database_handler();

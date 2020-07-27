@@ -15,7 +15,7 @@ Notice 0: Finished DEF file: repairtiming1.def
 wns -0.073
 tns -0.073
 Invoking repair_timing transform 
-Buffer library: BUF_X16, BUF_X4, BUF_X32 
+Buffer library: BUF_X16, BUF_X32, BUF_X4 
 Inverter library: None 
 Buffering: enabled 
 Driver sizing: enabled 
@@ -23,19 +23,19 @@ Pin-swapping: enabled
 Mode: Timing-Driven 
 Iteration 1 
 Found 1 negative slack paths 
-Buffers: 13 
+Buffers: 12 
 Resize up: 2 
 Resize down: 2 
 Pin Swap: 8 
 Buffered nets: 11 
+Fanout violations: 0 
 Transition violations: 7 
 Capacitance violations: 23 
+Slack gain: 5.3073e-10 
 Initial area: 59712 
-New area: 59737 
-Finished repair_timing transform ( 25 ) 
-Added/updated 25 cells
+New area: 59736 
+Finished repair_timing transform ( 24 ) 
+Added/updated 24 cells
 wns 0.000
 tns 0.000
-Differences found at line 10999.
-    - _45765_ OR4_X1 + PLACED ( 637158 672554 ) N ;
-    - _45765_ OR4_X2 + PLACED ( 637158 672554 ) N ;
+No differences found.

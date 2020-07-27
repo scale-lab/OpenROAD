@@ -100,6 +100,7 @@ get_database()
 {
     return *(Psn::instance().database());
 }
+
 std::vector<std::string>
 transition_violations()
 {
@@ -107,6 +108,7 @@ transition_violations()
     if (!Psn::instance().hasDesign())
     {
         PSN_LOG_ERROR("Could not find any loaded design.");
+
         return names;
     }
     for (auto& pin : Psn::instance().handler()->maximumTransitionViolations())
@@ -115,6 +117,7 @@ transition_violations()
     }
     return names;
 }
+
 std::vector<std::string>
 capacitance_violations()
 {
@@ -122,9 +125,27 @@ capacitance_violations()
     if (!Psn::instance().hasDesign())
     {
         PSN_LOG_ERROR("Could not find any loaded design.");
+
         return names;
     }
     for (auto& pin : Psn::instance().handler()->maximumCapacitanceViolations())
+    {
+        names.push_back(Psn::instance().handler()->name(pin));
+    }
+    return names;
+}
+
+std::vector<std::string>
+fanout_violations()
+{
+    std::vector<std::string> names;
+    if (!Psn::instance().hasDesign())
+    {
+        PSN_LOG_ERROR("Could not find any loaded design.");
+
+        return names;
+    }
+    for (auto& pin : Psn::instance().handler()->maximumFanoutViolations())
     {
         names.push_back(Psn::instance().handler()->name(pin));
     }

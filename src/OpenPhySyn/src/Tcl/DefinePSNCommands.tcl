@@ -310,7 +310,7 @@ namespace eval psn {
 
 
     define_cmd_args "repair_timing" {[-capacitance_violations]\
-        [-transition_violations]\
+        [-transition_violations] [-fanout_violations]\
         [-negative_slack_violations] [-iterations iteration_count] [-buffers buffer_cells]\
         [-inverters inverter cells] [-minimum_gain gain] [-auto_buffer_library size]\
         [-no_minimize_buffer_library] [-auto_buffer_library_inverters_enabled]\
@@ -320,7 +320,7 @@ namespace eval psn {
         [-legalization_frequency num_edits] [-high_effort] [-capacitance_pessimism_factor factor] [-transition_pessimism_factor factor]\
         [-upstream_resistance res] [-maximum_negative_slack_paths count] [-maximum_negative_slack_path_depth count]\
     }
-
+    
     proc repair_timing { args } {
         if {![psn::has_liberty]} {
             sta::sta_error "No liberty filed is loaded"
