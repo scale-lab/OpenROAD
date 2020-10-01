@@ -77,7 +77,10 @@ DatabaseHandler::DatabaseHandler(Psn* psn_inst, DatabaseSta* sta)
       psn_(psn_inst),
       has_wire_rc_(false),
       maximum_area_valid_(false),
-      has_library_cell_mappings_(false)
+      has_library_cell_mappings_(false),
+      capacitance_limits_initialized_(false),
+      slew_limits_initialized_(false),
+      fanout_limits_initialized_(false)
 {
     // Use default corner for now
     corner_                      = sta_->findCorner("default");
@@ -1384,7 +1387,7 @@ DatabaseHandler::required(InstanceTerm* term) const
 {
     auto vert = network()->graph()->pinLoadVertex(term);
     auto req  = sta_->vertexRequired(vert, min_max_);
-    if (sta::delayInf(req))
+    if (sta::fuzzyInf(req))
     {
         return 0;
     }
@@ -1397,13 +1400,12 @@ DatabaseHandler::required(InstanceTerm* term, bool is_rise,
     auto vert = network()->graph()->pinLoadVertex(term);
     auto req  = sta_->vertexRequired(
         vert, is_rise ? sta::RiseFall::rise() : sta::RiseFall::fall(), path_ap);
-    if (sta::delayInf(req))
+    if (sta::fuzzyInf(req))
     {
         return 0;
     }
     return req;
 }
-
 std::vector<std::vector<PathPoint>>
 DatabaseHandler::getPaths(bool get_max, int path_count) const
 {
@@ -1526,7 +1528,7 @@ DatabaseHandler::expandPath(sta::Path* path, bool enumed) const
         auto arrival       = ref->arrival(sta_);
         auto path_ap       = ref->pathAnalysisPt(sta_);
         auto path_required = enumed ? 0 : ref->required(sta_);
-        if (!path_required || sta::delayInf(path_required))
+        if (!path_required || sta::fuzzyInf(path_required))
         {
             path_required = required(pin, is_rising, path_ap);
         }
@@ -1975,11 +1977,13 @@ DatabaseHandler::ripupBuffer(Instance* buffer)
         if (!source_net)
         {
             PSN_LOG_ERROR("Cannot find buffer driving net");
+
             return;
         }
         if (!sink_net)
         {
             PSN_LOG_ERROR("Cannot find buffer driven net");
+
             return;
         }
         auto driven_pins = fanoutPins(sink_net, true);
@@ -2400,6 +2404,13 @@ DatabaseHandler::createClock(const char*             clock_name,
                     const_cast<char*>(comment));
 }
 void
+DatabaseHandler::setMaximumFanout(int max_fanout)
+{
+    sta_->setFanoutLimit(network()->cell(network()->topInstance()),
+                         sta::MinMax::max(), max_fanout);
+}
+
+void
 DatabaseHandler::createClock(const char*              clock_name,
                              std::vector<std::string> port_names, float period)
 {
@@ -2490,7 +2501,7 @@ DatabaseHandler::setDontUse(std::vector<std::string>& cell_names)
         auto cell = libraryCell(name.c_str());
         if (!cell)
         {
-            PSN_LOG_WARN("Cannot find cell with the name {}", name);
+            PSN_LOG_WARN("Cannot find cell with the name", name);
         }
         else
         {
@@ -2794,6 +2805,7 @@ void
 DatabaseHandler::setWireRC(float res_per_micron, float cap_per_micron,
                            bool reset_delays)
 {
+    sta_->parasitics()->clear();
     if (reset_delays)
     {
         sta_->ensureGraph();
@@ -2877,27 +2889,30 @@ DatabaseHandler::capacitanceLimit(InstanceTerm* term) const
 
 bool
 DatabaseHandler::violatesMaximumCapacitance(InstanceTerm* term,
-                                            float limit_scale_factor) const
+                                            float         limit_scale_factor)
 {
     float load_cap = loadCapacitance(term);
     return violatesMaximumCapacitance(term, load_cap, limit_scale_factor);
 }
-
-// Assumes sta checkCapacitanceLimitPreamble is called()
 bool
 DatabaseHandler::violatesMaximumCapacitance(InstanceTerm* term, float load_cap,
-                                            float limit_scale_factor) const
+                                            float limit_scale_factor)
 {
     const sta::Corner*   corner;
     const sta::RiseFall* rf;
     float                cap, limit, ignore;
+    if (!capacitance_limits_initialized_)
+    {
+        sta_->checkCapacitanceLimitPreamble();
+        capacitance_limits_initialized_ = true;
+    }
+
     sta_->checkCapacitance(term, nullptr, sta::MinMax::max(), corner, rf, cap,
                            limit, ignore);
     float diff = (limit_scale_factor * limit) - cap;
     return diff < 0.0 && limit > 0.0;
 }
 
-// Assumes sta checkSlewLimitPreamble is called()
 bool
 DatabaseHandler::violatesMaximumTransition(InstanceTerm* term,
                                            float         limit_scale_factor)
@@ -2906,10 +2921,37 @@ DatabaseHandler::violatesMaximumTransition(InstanceTerm* term,
     const sta::RiseFall* rf;
     float                slew, limit, ignore;
 
+    if (!slew_limits_initialized_)
+    {
+        sta_->checkSlewLimitPreamble();
+        slew_limits_initialized_ = true;
+    }
+
     sta_->checkSlew(term, nullptr, sta::MinMax::max(), false, corner, rf, slew,
                     limit, ignore);
     float diff = (limit_scale_factor * limit) - slew;
     return diff < 0.0 && limit > 0.0;
+}
+
+bool
+DatabaseHandler::violatesMaximumFanout(InstanceTerm* term, int max_fanout)
+{
+    const sta::Corner* corner;
+    float              fo, limit, diff;
+    if (!fanout_limits_initialized_)
+    {
+        sta_->checkFanoutLimitPreamble();
+        fanout_limits_initialized_ = true;
+    }
+    sta_->checkFanout(term, sta::MinMax::max(), fo, limit, diff);
+    if (max_fanout)
+    {
+        return fo > max_fanout;
+    }
+    else
+    {
+        return diff < 0 && !sta::fuzzyInf(diff);
+    }
 }
 
 ElectircalViolation
@@ -2959,17 +3001,26 @@ DatabaseHandler::hasElectricalViolation(InstanceTerm* pin,
 }
 
 std::vector<InstanceTerm*>
-DatabaseHandler::maximumTransitionViolations(float limit_scale_factor) const
+DatabaseHandler::maximumTransitionViolations(float limit_scale_factor)
 {
     auto vio_pins = sta_->pinSlewLimitViolations(corner_, sta::MinMax::max());
+    slew_limits_initialized_ = true;
     return std::vector<InstanceTerm*>(vio_pins->begin(), vio_pins->end());
 }
 std::vector<InstanceTerm*>
-DatabaseHandler::maximumCapacitanceViolations(float limit_scale_factor) const
+DatabaseHandler::maximumCapacitanceViolations(float limit_scale_factor)
 {
-    sta_->findDelays();
     auto vio_pins =
         sta_->pinCapacitanceLimitViolations(corner_, sta::MinMax::max());
+    capacitance_limits_initialized_ = true;
+    return std::vector<InstanceTerm*>(vio_pins->begin(), vio_pins->end());
+}
+std::vector<InstanceTerm*>
+DatabaseHandler::maximumFanoutViolations(int max_fanout)
+{
+    auto vio_pins = sta_->pinFanoutLimitViolations(sta::MinMax::max());
+
+    fanout_limits_initialized_ = true;
     return std::vector<InstanceTerm*>(vio_pins->begin(), vio_pins->end());
 }
 
@@ -3015,11 +3066,14 @@ DatabaseHandler::allLibs() const
 void
 DatabaseHandler::resetCache()
 {
-    has_equiv_cells_           = false;
-    has_buffer_inverter_seq_   = false;
-    has_target_loads_          = false;
-    has_library_cell_mappings_ = false;
-    maximum_area_valid_        = false;
+    has_equiv_cells_                = false;
+    has_buffer_inverter_seq_        = false;
+    has_target_loads_               = false;
+    has_library_cell_mappings_      = false;
+    maximum_area_valid_             = false;
+    slew_limits_initialized_        = false;
+    capacitance_limits_initialized_ = false;
+    fanout_limits_initialized_      = false;
     target_load_map_.clear();
     resetLibraryMapping();
 }
@@ -4201,9 +4255,51 @@ DatabaseHandler::calculateParasitics(Net* net)
     if (compute_parasitics_callback_ != nullptr)
     {
         compute_parasitics_callback_(net);
+        return;
+    }
+    auto tree = SteinerTree::create(net, psn_);
+    if (tree && tree->isPlaced())
+    {
+        sta::Parasitic* parasitic = sta_->parasitics()->makeParasiticNetwork(
+            net, false, parasitics_ap_);
+        int branch_count = tree->branchCount();
+        for (int i = 0; i < branch_count; i++)
+        {
+            auto                branch = tree->branch(i);
+            sta::ParasiticNode* n1 =
+                findParasiticNode(tree, parasitic, net, branch.firstPin(),
+                                  branch.firstSteinerPoint());
+            sta::ParasiticNode* n2 =
+                findParasiticNode(tree, parasitic, net, branch.secondPin(),
+                                  branch.secondSteinerPoint());
+            if (n1 != n2)
+            {
+                if (branch.wireLength() == 0)
+                {
+                    sta_->parasitics()->makeResistor(nullptr, n1, n2, 1.0e-3,
+                                                     parasitics_ap_);
+                }
+                else
+                {
+                    float wire_length = dbuToMeters(branch.wireLength());
+                    float wire_cap    = wire_length * cap_per_micron_;
+                    float wire_res    = wire_length * res_per_micron_;
+                    sta_->parasitics()->incrCap(n1, wire_cap / 2.0,
+                                                parasitics_ap_);
+                    sta_->parasitics()->makeResistor(nullptr, n1, n2, wire_res,
+                                                     parasitics_ap_);
+                    sta_->parasitics()->incrCap(n2, wire_cap / 2.0,
+                                                parasitics_ap_);
+                }
+            }
+        }
+        sta::ReduceParasiticsTo red = sta::ReduceParasiticsTo::pi_elmore;
+        auto cond = sta_->sdc()->operatingConditions(sta::MinMax::max());
+        sta_->parasitics()->reduceTo(parasitic, net, red, cond, corner_,
+                                     sta::MinMax::max(), parasitics_ap_);
+        sta_->parasitics()->deleteParasiticNetwork(net, parasitics_ap_);
     }
 }
-
 sta::ParasiticNode*
 DatabaseHandler::findParasiticNode(std::unique_ptr<SteinerTree>& tree,
                                    sta::Parasitic* parasitic, const Net* net,

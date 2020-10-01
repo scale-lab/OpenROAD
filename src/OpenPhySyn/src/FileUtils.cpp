@@ -30,7 +30,7 @@
 // POSSIBILITY OF SUCH DAMAGE.
 
 #ifdef __has_include
-#if defined(USE_STD_FILESYSTEM) && __cplusplus > 201402L
+#if __cplusplus > 201402L
 #include <filesystem>
 namespace fs = std::filesystem;
 #else
