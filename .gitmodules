@@ -3,10 +3,10 @@
 	url = https://github.com/The-OpenROAD-Project/OpenSTA.git
 [submodule "module/OpenDB"]
 	path = src/OpenDB
-	url = ../OpenDB.git
+	url = https://github.com/The-OpenROAD-Project/OpenDB.git
 [submodule "flute3"]
 	path = src/flute3
-	url = ../flute3.git
+	url = https://github.com/The-OpenROAD-Project/flute3.git
 [submodule "src/OpenRCX"]
 	path = src/OpenRCX
-	url = ../OpenRCX.git
+	url = https://github.com/The-OpenROAD-Project/OpenRCX.git
